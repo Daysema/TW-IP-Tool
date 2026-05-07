@@ -48,7 +48,7 @@ def _kb_main(tm: TaskManager) -> InlineKeyboardMarkup:
                 ),
             ],
             [
-                InlineKeyboardButton("Статус", callback_data="status"),
+                InlineKeyboardButton("Статистика", callback_data="status"),
                 InlineKeyboardButton("Конфиг", callback_data="config"),
             ],
             [
@@ -82,7 +82,7 @@ def _fmt_status(tm: TaskManager) -> str:
     st = tm.tool_stats
     bl_now = count_blacklisted_among_tokens(tm.tokens, tm.data_dir)
     text = (
-        "<b>TW IP Tool · Статус</b>\n\n"
+        "<b>Панель статистики</b>\n\n"
         "<i>Счётчики ниже — накопительно, до сброса кнопкой «Сброс статистики». "
         "Во время работы не меняются; обновляются после завершения прогона поиска.</i>\n\n"
         f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
@@ -177,6 +177,35 @@ class BotApp:
         self._auto_spin_task: Optional[asyncio.Task] = None
         self._status_target: Optional[tuple[str, int]] = None  # (chat_id, message_id)
 
+    async def _open_main_panel(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        edit: bool = False,
+        extra_html: str = "",
+    ) -> None:
+        """Главный экран: статистика + клавиатура; при необходимости автообновление текста."""
+        app = context.application
+        base = _fmt_status(self.tm)
+        text = f"{base}\n\n{extra_html}" if extra_html else base
+        chat = update.effective_chat
+        if not chat:
+            return
+        self._active_chat_id = str(chat.id)
+        q = update.callback_query
+        rm = _kb_main(self.tm)
+        if q and edit and q.message:
+            try:
+                await q.edit_message_text(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
+                self._start_status_refresh(app, str(chat.id), q.message.message_id)
+            except BadRequest:
+                m = await chat.send_message(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
+                self._start_status_refresh(app, str(chat.id), m.message_id)
+        else:
+            m = await chat.send_message(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
+            self._start_status_refresh(app, str(chat.id), m.message_id)
+
     def run(self) -> None:
         app = Application.builder().token(self.bot_token).build()
 
@@ -210,7 +239,7 @@ class BotApp:
                 await app.bot.set_my_commands(
                     [
                         BotCommand("start", "Старт (показать меню)"),
-                        BotCommand("status", "Статус"),
+                        BotCommand("status", "Статистика (панель в чате)"),
                         BotCommand("stop", "Остановить задачи"),
                         BotCommand("cancel", "Отмена ввода"),
                     ]
@@ -345,24 +374,21 @@ class BotApp:
         if update.effective_chat:
             self._active_chat_id = str(update.effective_chat.id)
         if not self.tm.tokens:
-            await _send_text(
+            await self._open_main_panel(
                 update,
                 context,
-                "Токенов нет.\n\nДобавьте токены в разделе <b>🛠 Токены</b>.",
-                reply_markup=_kb_main(self.tm),
+                edit=False,
+                extra_html="<b>Токенов нет.</b> Добавьте в разделе 🛠 Токены.",
             )
             return
-        await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm))
+        await self._open_main_panel(update, context, edit=False)
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _allowed(update, self.allowed_chat_id, self.allowed_user_id):
             return
-        # Send a dedicated status message and refresh it every 5 seconds
-        msg = await update.effective_chat.send_message(
-            text=_fmt_status(self.tm), reply_markup=_kb_main(self.tm), parse_mode=ParseMode.HTML
-        )
-        self._active_chat_id = str(update.effective_chat.id)
-        self._start_status_refresh(context.application, str(update.effective_chat.id), msg.message_id)
+        if update.effective_chat:
+            self._active_chat_id = str(update.effective_chat.id)
+        await self._open_main_panel(update, context, edit=False)
 
     async def cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _allowed(update, self.allowed_chat_id, self.allowed_user_id):
@@ -373,7 +399,7 @@ class BotApp:
     async def cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         if not _allowed(update, self.allowed_chat_id, self.allowed_user_id):
             return ConversationHandler.END
-        await _send_text(update, context, "Отменено.", reply_markup=_kb_main(self.tm))
+        await self._open_main_panel(update, context, edit=False, extra_html="<i>Ввод отменён.</i>")
         return ConversationHandler.END
 
     async def cb_add_one(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -432,7 +458,12 @@ class BotApp:
             seen_in_block.add(t)
             add.append(t)
         if not add:
-            await _send_text(update, context, "Все эти токены уже добавлены.", reply_markup=_kb_main(self.tm))
+            await self._open_main_panel(
+                update,
+                context,
+                edit=False,
+                extra_html="<b>Все эти токены уже добавлены.</b>",
+            )
             return ConversationHandler.END
 
         from .core import TokenEntry as TE
@@ -458,7 +489,8 @@ class BotApp:
             msg_parts.append(f"Пропущено некорректных: <code>{len(invalid)}</code>\n")
         msg_parts.append(f"Всего токенов: <code>{len(deduped)}</code>")
 
-        await _send_text(update, context, "".join(msg_parts), reply_markup=_kb_main(self.tm))
+        extra = "".join(msg_parts)
+        await self._open_main_panel(update, context, edit=False, extra_html=extra)
         asyncio.create_task(self._try_auto_start_hunter())
         return ConversationHandler.END
 
@@ -506,7 +538,12 @@ class BotApp:
             )
             return STATE_ADD_ONE
         if any(t.token == tok for t in self.tm.tokens):
-            await _send_text(update, context, "Этот токен уже есть.", reply_markup=_kb_main(self.tm))
+            await self._open_main_panel(
+                update,
+                context,
+                edit=False,
+                extra_html="<b>Этот токен уже есть.</b>",
+            )
             return ConversationHandler.END
 
         from .core import TokenEntry as TE
@@ -516,7 +553,12 @@ class BotApp:
         tokens = [*self.tm.tokens, TE(token=tok, label=label)]
         save_tokens(self.data_dir / "accounts.json", tokens)
         self.tm.set_tokens(tokens)
-        await _send_text(update, context, f"Добавлено: <code>1</code>. Всего: <code>{len(tokens)}</code>", reply_markup=_kb_main(self.tm))
+        await self._open_main_panel(
+            update,
+            context,
+            edit=False,
+            extra_html=f"Добавлено: <code>1</code>. Всего: <code>{len(tokens)}</code>",
+        )
         asyncio.create_task(self._try_auto_start_hunter())
         return ConversationHandler.END
 
@@ -538,7 +580,7 @@ class BotApp:
             self._active_chat_id = str(update.effective_chat.id)
 
         data = q.data or ""
-        # Any navigation away from status stops auto-refresh.
+        # Уход с главной панели (статистика) — останавливаем автообновление; кнопка «Статистика» не трогает.
         if data != "status":
             self._stop_status_refresh()
         if data == "auto_spin_toggle":
@@ -547,14 +589,19 @@ class BotApp:
             if self.tm.auto_spin_enabled:
                 self.tm.clear_auto_spin_user_stop()
                 if not self.tm.tokens:
-                    await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+                    await self._open_main_panel(
+                        update,
+                        context,
+                        edit=True,
+                        extra_html="<b>Авто-крутка включена.</b> Токенов нет — добавьте в 🛠 Токены.",
+                    )
                     return
                 await self._try_auto_start_hunter()
             else:
                 self.tm.mark_auto_spin_user_stop()
                 if self.tm.status.hunter_running:
                     self.tm.stop_hunter()
-            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+            await self._open_main_panel(update, context, edit=True)
             return
         if data == "tokens":
             await _send_text(update, context, _fmt_tokens(self.tm), reply_markup=_kb_tokens(self.tm), edit=True)
@@ -621,45 +668,37 @@ class BotApp:
             # Clear tokens on disk and in memory
             save_tokens(self.data_dir / "accounts.json", [])
             self.tm.set_tokens([])
-            await _send_text(update, context, "Токены очищены.", reply_markup=_kb_main(self.tm), edit=True)
+            await self._open_main_panel(update, context, edit=True, extra_html="<i>Токены очищены.</i>")
             return
         if data == "stats_reset":
             self.tm.reset_tool_stats()
-            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+            await self._open_main_panel(update, context, edit=True)
             return
         if data == "collect_toggle":
             if self.tm.status.collect_running:
                 self.tm.stop_collect()
             else:
                 if not self.tm.tokens:
-                    await _send_text(
+                    await self._open_main_panel(
                         update,
                         context,
-                        "Токенов нет. Добавьте токены в разделе <b>🛠 Токены</b>.",
-                        reply_markup=_kb_main(self.tm),
                         edit=True,
+                        extra_html="<b>Токенов нет.</b> Добавьте в разделе 🛠 Токены.",
                     )
                     return
                 await self.tm.start_collect()
-            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+            await self._open_main_panel(update, context, edit=True)
             return
         if data == "status":
-            # Enable auto-refresh of this status message every 5 seconds.
-            if update.effective_chat and update.callback_query and update.callback_query.message:
-                self._start_status_refresh(
-                    context.application,
-                    str(update.effective_chat.id),
-                    update.callback_query.message.message_id,
-                )
-            await _send_text(update, context, _fmt_status(self.tm), reply_markup=_kb_main(self.tm), edit=True)
+            await self._open_main_panel(update, context, edit=True)
             return
         if data == "back":
-            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+            await self._open_main_panel(update, context, edit=True)
             return
         if data == "config":
             await _send_text(update, context, _fmt_config(self.tm), reply_markup=_kb_main(self.tm), edit=True)
             return
-        await _send_text(update, context, "Неизвестная команда", reply_markup=_kb_main(self.tm), edit=True)
+        await self._open_main_panel(update, context, edit=True, extra_html="<b>Неизвестная команда</b>")
 
     def _start_status_refresh(self, app: Application, chat_id: str, message_id: int) -> None:
         self._status_target = (chat_id, int(message_id))
