@@ -327,8 +327,7 @@ def blacklist_release_timer_line(tokens: list[TokenEntry], data_dir: Path) -> st
         return "\n\n<b>Blacklist:</b> сроки снятия неизвестны (проверьте <code>blacklist.json</code>)."
     rem = best - now
     human = _format_timedelta_ru(rem)
-    clock = best.strftime("%d.%m.%Y %H:%M:%S")
-    return f"\n\n<b>Ближайшее снятие blacklist</b> (из ваших аккаунтов): через <code>{human}</code>\n<i>локальное время сервера ≈ {clock}</i>"
+    return f"\n\n<b>Ближайший токен освободится через:</b> <code>{human}</code>\n"
 
 
 class IPBlacklist:
