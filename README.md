@@ -1,91 +1,81 @@
-# TW IP Tool (Telegram Bot + Docker)
+# TW-IP-Tool (Telegram Bot + Docker)
 
-## Что это
-Инструмент для работы с плавающими IP Timeweb Cloud:
-- **Hunter**: создаёт floating IP, оставляет только подходящие по `target_networks`, остальные удаляет.
-- **Collect**: сканирует аккаунты, собирает подходящие IP и (опционально) удаляет все лишние IP.
-
-Управление — через **Telegram‑бота** (кнопки), запуск — в **Docker**.
-
-## Быстрый старт (Ubuntu 24)
-
-### 1) Установите Docker + Compose
-- `docker` и `docker compose` должны быть доступны.
-
-### 2) Создайте данные в volume (локальной папкой проще)
-Рекомендуемый вариант — монтировать локальную папку вместо named volume.
-
-Пример структуры:
-- `./data/accounts.json`
-- `./data/config.json` (опционально)
-- `./data/results/` (создастся автоматически)
-
-#### Вариант A (рекомендуется): токены загружать прямо в боте
-В этом случае достаточно создать пустой файл `./data/accounts.json`:
-
-```json
-[]
-```
-
-Потом зайдите в бота → `🛠 Токены` и добавляйте токены кнопками (по 1 / txt файлом).
-
-#### Вариант B: заранее положить токены в файл
-`./data/accounts.json`:
-
-```json
-[
-  { "token": "TW_BEARER_TOKEN_1", "label": "acc1" },
-  { "token": "TW_BEARER_TOKEN_2", "label": "acc2", "proxy": "socks5://user:pass@host:1080" }
-]
-```
-
-`./data/config.json` (опционально):
-
-```json
-{
-  "allowed_user_id": "123456789",
-  "target_networks": [
-    "109.73.201.0/24",
-    "94.228.117.0/24",
-    "81.200.148.0/24",
-    "81.200.149.0/24",
-    "81.200.150.0/24",
-    "81.200.151.0/24"
-  ],
-  "target_subnets": [
-    {"prefix":"109.73.201.","zone":"msk-1","loc":"МСК"},
-    {"prefix":"94.228.117.","zone":"spb-3","loc":"СПБ"}
-  ],
-  "collect": { "delete_nontarget": true, "parallel": 5 },
-  "hunter":  { "daily_limit": 100, "stop_on_found": false }
-}
-```
-
-### 3) Запуск
-Скопируйте файл `.env` рядом с `docker-compose.yml` и заполните его:
+## 1) Установите Docker на сервер (Ubuntu 24)
 
 ```bash
-TG_BOT_TOKEN=123456:ABCDEF...
-TG_ADMIN_USER_ID=123456789
-
-# optional
-# TG_CHAT_ID=123456789
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
 ```
 
-Запуск:
+Проверка:
+
+```bash
+docker --version
+docker compose version
+```
+
+## 2) Установите бота на сервер
+
+### 2.1 Скачайте проект
+
+```bash
+sudo apt install -y git
+git clone https://github.com/Daysema/TW-IP-Tool.git
+cd TW-IP-Tool
+```
+
+### 2.2 Подготовьте данные
+Создайте папку `data` (она примонтируется в контейнер как `/data`):
+
+```bash
+mkdir -p data/results
+echo "[]" > data/accounts.json
+```
+
+Токены можно загружать прямо в боте через меню `🛠 Токены`.
+
+### 2.3 Создайте `.env` и заполните
+Скопируйте пример и впишите свои данные:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Нужно заполнить:
+- `TG_BOT_TOKEN` — токен бота от `@BotFather`
+- `TG_ADMIN_USER_ID` — ваш Telegram user id (можно узнать у `@userinfobot`)
+
+Опционально:
+- `TG_CHAT_ID` — если хотите, чтобы логи всегда шли в конкретный чат
+
+## 3) Запуск бота
 
 ```bash
 docker compose up -d --build
+docker compose logs -f
 ```
 
-Откройте бота в Telegram и отправьте `/start`.
+В Telegram напишите боту `/start`.
 
-## Запуск без Docker (для теста)
+Остановить:
 
 ```bash
-pip install -r requirements.txt
-export TG_BOT_TOKEN=...
-export TG_ADMIN_USER_ID=...
-python -m tw_tool
+docker compose down
+```
+
+## 4) Как обновить бота
+
+```bash
+cd TW-IP-Tool
+git pull
+docker compose up -d --build
 ```
 
