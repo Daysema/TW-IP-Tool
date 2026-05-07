@@ -458,7 +458,7 @@ async def hunter_events(
                     or "limit" in body_l
                     or "quota" in body_l
                 ):
-                    token_bl.add(tok.token, "no_balance_or_quota", ttl_hours=24)
+                    token_bl.add(tok.token, "no_balance_or_quota", ttl_hours=1)
                     # В чат отправляем только одно отдельное уведомление.
                     yield {"type": "log", "level": "info", "msg": f"[{label}] → blacklist на 24ч (баланс/лимит)"}
                     yield {
