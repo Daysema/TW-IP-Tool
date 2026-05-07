@@ -277,6 +277,60 @@ def count_blacklisted_among_tokens(tokens: list[TokenEntry], data_dir: Path) -> 
     return sum(1 for t in tokens if bl.is_blacklisted(t.token))
 
 
+def _format_timedelta_ru(td: timedelta) -> str:
+    total = int(td.total_seconds())
+    if total <= 0:
+        return "сейчас"
+    days, rem = divmod(total, 86400)
+    h, rem2 = divmod(rem, 3600)
+    m, s = divmod(rem2, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days} дн.")
+    if h:
+        parts.append(f"{h} ч")
+    if m:
+        parts.append(f"{m} мин")
+    if not parts:
+        if s:
+            parts.append(f"{s} с")
+        else:
+            parts.append("менее минуты")
+    return " ".join(parts)
+
+
+def blacklist_release_timer_line(tokens: list[TokenEntry], data_dir: Path) -> str:
+    """Строка для панели: когда снимется ближайший из аккаунтов в blacklist. Пусто, если нечего ждать."""
+    if not tokens:
+        return ""
+    bl = TokenBlacklist(data_dir / "blacklist.json")
+    ent = bl.entries
+    tok_set = {t.token for t in tokens}
+    n_bl = sum(1 for t in tokens if t.token in ent)
+    if n_bl <= 0:
+        return ""
+    now = datetime.now()
+    best: Optional[datetime] = None
+    for tok_str in tok_set:
+        if tok_str not in ent:
+            continue
+        meta = ent.get(tok_str) or {}
+        try:
+            exp = datetime.fromisoformat(str(meta.get("expires", "")))
+        except Exception:
+            continue
+        if exp <= now:
+            continue
+        if best is None or exp < best:
+            best = exp
+    if best is None:
+        return "\n\n<b>Blacklist:</b> сроки снятия неизвестны (проверьте <code>blacklist.json</code>)."
+    rem = best - now
+    human = _format_timedelta_ru(rem)
+    clock = best.strftime("%d.%m.%Y %H:%M:%S")
+    return f"\n\n<b>Ближайшее снятие blacklist</b> (из ваших аккаунтов): через <code>{human}</code>\n<i>локальное время сервера ≈ {clock}</i>"
+
+
 class IPBlacklist:
     def __init__(self, path: Path):
         self.path = path

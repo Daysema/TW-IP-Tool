@@ -20,7 +20,15 @@ from telegram.ext import (
 )
 
 from .config import dedupe_tokens, load_app_config, patch_app_config, save_tokens
-from .core import count_available_tokens, count_blacklisted_among_tokens, is_token_valid, normalize_token, required_zones, token_login
+from .core import (
+    blacklist_release_timer_line,
+    count_available_tokens,
+    count_blacklisted_among_tokens,
+    is_token_valid,
+    normalize_token,
+    required_zones,
+    token_login,
+)
 from .task_manager import TaskManager
 
 logger = logging.getLogger("tw_tool")
@@ -98,7 +106,7 @@ def _fmt_status(tm: TaskManager) -> str:
         f"Удалено (не подходит): <code>{disp_d}</code>\n"
         f"Подходит (найдено): <code>{disp_f}</code>{suffix}"
     )
-    return text
+    return text.rstrip() + blacklist_release_timer_line(tm.tokens, tm.data_dir)
 
 
 def _fmt_config(tm: TaskManager) -> str:
