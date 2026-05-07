@@ -20,7 +20,17 @@
 - `./data/config.json` (опционально)
 - `./data/results/` (создастся автоматически)
 
-`accounts.json`:
+#### Вариант A (рекомендуется): токены загружать прямо в боте
+В этом случае достаточно создать пустой файл `./data/accounts.json`:
+
+```json
+[]
+```
+
+Потом зайдите в бота → `🛠 Токены` и добавляйте токены кнопками (по 1 / txt файлом).
+
+#### Вариант B: заранее положить токены в файл
+`./data/accounts.json`:
 
 ```json
 [
@@ -29,11 +39,11 @@
 ]
 ```
 
-`config.json` (опционально):
+`./data/config.json` (опционально):
 
 ```json
 {
-  "allowed_chat_id": "123456789",
+  "allowed_user_id": "123456789",
   "target_networks": [
     "109.73.201.0/24",
     "94.228.117.0/24",
@@ -52,11 +62,14 @@
 ```
 
 ### 3) Запуск
-Создайте `.env` рядом с `docker-compose.yml`:
+Скопируйте файл `.env` рядом с `docker-compose.yml` и заполните его:
 
 ```bash
 TG_BOT_TOKEN=123456:ABCDEF...
-TG_CHAT_ID=123456789
+TG_ADMIN_USER_ID=123456789
+
+# optional
+# TG_CHAT_ID=123456789
 ```
 
 Запуск:
@@ -71,8 +84,8 @@ docker compose up -d --build
 
 ```bash
 pip install -r requirements.txt
-set TG_BOT_TOKEN=...
-set TG_CHAT_ID=...
+export TG_BOT_TOKEN=...
+export TG_ADMIN_USER_ID=...
 python -m tw_tool
 ```
 
