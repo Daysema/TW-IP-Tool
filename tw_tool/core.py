@@ -219,7 +219,7 @@ class TokenBlacklist:
         self._cleanup()
         return token in self._data
 
-    def add(self, token: str, reason: str, *, ttl_hours: float = 23.0):
+    def add(self, token: str, reason: str, *, ttl_hours: float = 24.0):
         expires = (datetime.now() + timedelta(hours=float(ttl_hours))).isoformat()
         self._data[token] = {
             "reason": reason,
@@ -254,11 +254,11 @@ class IPBlacklist:
             pass
 
     def add(self, ip: str):
-        self._ips.add(ip)
+        self._ips.add(str(ip))
         self._save()
 
     def has(self, ip: str) -> bool:
-        return ip in self._ips
+        return str(ip) in self._ips
 
 
 async def cleanup_nontarget_ips(
@@ -274,7 +274,8 @@ async def cleanup_nontarget_ips(
         iid = item.get("id")
         if not addr or iid is None:
             continue
-        if not ip_in_targets(addr, target_networks) and not ip_bl.has(addr):
+        # По требованию: любой НЕцелевой IP всегда удаляем (даже если уже встречался раньше).
+        if not ip_in_targets(addr, target_networks):
             yield {"type": "log", "level": "info", "msg": f"[{label}] Удаляю нецелевой IP: {addr}"}
             ok, status, body = await delete_ip(client, iid)
             if ok:
@@ -332,8 +333,8 @@ async def hunter_events(
         if daily_cnt[tok.token] >= params.daily_limit:
             # Достигли дневного лимита по нашим счётчикам — просто пропускаем токен на 23 часа.
             # Не спамим в чат этим событием.
-            yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (23ч)"}
-            token_bl.add(tok.token, "daily_limit", ttl_hours=23)
+            yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (24ч)"}
+            token_bl.add(tok.token, "daily_limit", ttl_hours=24)
             async with make_client(tok.token, tok.proxy) as cl:
                 async for ev in cleanup_nontarget_ips(cl, ip_bl, label, target_networks):
                     yield ev
@@ -410,9 +411,9 @@ async def hunter_events(
                             err = str(j.get("error_code", "")).lower()
                             if err == "daily_limit_exceeded":
                                 # По требованию: кидаем в blacklist ровно на 23 часа, без уведомлений в чат.
-                                token_bl.add(tok.token, "daily_limit_exceeded", ttl_hours=23)
+                                token_bl.add(tok.token, "daily_limit_exceeded", ttl_hours=24)
                                 # Не спамим в чат такими событиями — это ожидаемая ситуация.
-                                yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (23ч)"}
+                                yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (24ч)"}
                                 continue
                     except Exception:
                         pass
@@ -434,8 +435,8 @@ async def hunter_events(
                     or "limit" in body_l
                     or "quota" in body_l
                 ):
-                    token_bl.add(tok.token, "no_balance_or_quota", ttl_hours=23)
-                    yield {"type": "log", "level": "warn", "msg": f"[{label}] → blacklist на 23ч (баланс/лимит)"}
+                    token_bl.add(tok.token, "no_balance_or_quota", ttl_hours=24)
+                    yield {"type": "log", "level": "warn", "msg": f"[{label}] → blacklist на 24ч (баланс/лимит)"}
                     yield {
                         "type": "admin_notice",
                         "kind": "no_balance",
