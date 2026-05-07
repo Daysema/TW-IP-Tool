@@ -81,7 +81,6 @@ def _allowed(update: Update, allowed_chat_id: Optional[str], allowed_user_id: Op
 def _fmt_status(tm: TaskManager) -> str:
     s = tm.status
     st = tm.tool_stats
-    hunter_state = "запущен" if s.hunter_running else "остановлен"
     collect_state = "запущен" if s.collect_running else "остановлен"
     bl_now = count_blacklisted_among_tokens(tm.tokens, tm.data_dir)
     text = (
@@ -92,7 +91,6 @@ def _fmt_status(tm: TaskManager) -> str:
         f"Доступных токенов (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
         f"В blacklist (из списка аккаунтов): <code>{bl_now}</code>\n\n"
-        f"<b>Поиск (создание IP)</b>: <b>{hunter_state}</b>\n"
         f"Создано: <code>{st.hunter_created}</code>\n"
         f"Удалено (не подходит): <code>{st.hunter_deleted}</code>\n"
         f"Подходит (найдено): <code>{st.hunter_found}</code>\n\n"

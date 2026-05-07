@@ -365,7 +365,7 @@ async def hunter_events(
 
         available = [t for t in tokens if not token_bl.is_blacklisted(t.token)]
         if not available:
-            yield {"type": "log", "level": "error", "msg": "Все токены исчерпаны!"}
+            yield {"type": "log", "level": "info", "msg": "Все токены исчерпаны (ждём снятия blacklist или новых токенов)."}
             break
 
         tok = available[token_idx % len(available)]
