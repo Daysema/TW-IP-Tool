@@ -19,8 +19,8 @@ from telegram.ext import (
     filters,
 )
 
-from .config import dedupe_tokens, load_app_config, save_tokens
-from .core import is_token_valid, normalize_token, required_zones, token_login
+from .config import dedupe_tokens, load_app_config, patch_app_config, save_tokens
+from .core import count_available_tokens, is_token_valid, normalize_token, required_zones, token_login
 from .task_manager import TaskManager
 
 logger = logging.getLogger("tw_tool")
@@ -53,6 +53,13 @@ def _kb_main(tm: TaskManager) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("🛠 Токены", callback_data="tokens"),
             ],
+            [
+                InlineKeyboardButton(
+                    "🔁 Авто-крутка: ВКЛ" if tm.auto_spin_enabled else "🔁 Авто-крутка: ВЫКЛ",
+                    callback_data="auto_spin_toggle",
+                    style="danger",
+                ),
+            ],
         ]
     )
 
@@ -76,6 +83,8 @@ def _fmt_status(tm: TaskManager) -> str:
     collect_state = "запущен" if s.collect_running else "остановлен"
     text = (
         "<b>TW IP Tool · Статус</b>\n\n"
+        f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
+        f"Доступных токенов (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
         f"В чёрном списке: <code>{s.hunter_blacklisted}</code>\n\n"
         f"<b>Поиск (создание IP)</b>: <b>{hunter_state}</b>\n"
@@ -162,10 +171,12 @@ class BotApp:
             collect_params=cfg.collect,
             target_subnets=cfg.target_subnets,
             target_networks=cfg.target_networks,
+            auto_spin_enabled=cfg.auto_spin_enabled,
         )
 
         self._log_task: Optional[asyncio.Task] = None
         self._status_task: Optional[asyncio.Task] = None
+        self._auto_spin_task: Optional[asyncio.Task] = None
         self._status_target: Optional[tuple[str, int]] = None  # (chat_id, message_id)
 
     def run(self) -> None:
@@ -209,10 +220,31 @@ class BotApp:
             except Exception as e:
                 logger.warning("Failed to set bot commands: %s", e)
             self._log_task = asyncio.create_task(self._log_loop(app))
+            self._auto_spin_task = asyncio.create_task(self._auto_spin_loop())
             # status refresher runs on-demand (when user opens status)
 
         app.post_init = _post_init
         app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    async def _try_auto_start_hunter(self) -> None:
+        if not self.tm.auto_spin_enabled or self.tm.auto_spin_user_stopped:
+            return
+        if self.tm.status.hunter_running:
+            return
+        if not self.tm.tokens:
+            return
+        if count_available_tokens(self.tm.tokens, self.tm.data_dir) < 1:
+            return
+        await self.tm.start_hunter()
+
+    async def _auto_spin_loop(self) -> None:
+        await asyncio.sleep(8)
+        while True:
+            try:
+                await self._try_auto_start_hunter()
+            except Exception as e:
+                logger.warning("Авто-крутка: %s", e)
+            await asyncio.sleep(25)
 
     async def on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Don't crash on Telegram edit/send errors; just log.
@@ -349,6 +381,7 @@ class BotApp:
     async def cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _allowed(update, self.allowed_chat_id, self.allowed_user_id):
             return
+        self.tm.mark_auto_spin_user_stop()
         self.tm.stop_all()
         await _send_text(update, context, "Останавливаю задачи…", reply_markup=_kb_main(self.tm))
 
@@ -441,6 +474,7 @@ class BotApp:
         msg_parts.append(f"Всего токенов: <code>{len(deduped)}</code>")
 
         await _send_text(update, context, "".join(msg_parts), reply_markup=_kb_main(self.tm))
+        asyncio.create_task(self._try_auto_start_hunter())
         return ConversationHandler.END
 
     async def doc_add_bulk(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -498,6 +532,7 @@ class BotApp:
         save_tokens(self.data_dir / "accounts.json", tokens)
         self.tm.set_tokens(tokens)
         await _send_text(update, context, f"Добавлено: <code>1</code>. Всего: <code>{len(tokens)}</code>", reply_markup=_kb_main(self.tm))
+        asyncio.create_task(self._try_auto_start_hunter())
         return ConversationHandler.END
 
     async def msg_add_bulk(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -521,6 +556,29 @@ class BotApp:
         # Any navigation away from status stops auto-refresh.
         if data != "status":
             self._stop_status_refresh()
+        if data == "auto_spin_toggle":
+            self.tm.auto_spin_enabled = not self.tm.auto_spin_enabled
+            patch_app_config(self.data_dir, auto_spin=self.tm.auto_spin_enabled)
+            if self.tm.auto_spin_enabled:
+                self.tm.clear_auto_spin_user_stop()
+                await self._try_auto_start_hunter()
+            state = "включена" if self.tm.auto_spin_enabled else "выключена"
+            hint = (
+                "\n\nПоиск сам запускается, если есть хотя бы один токен вне blacklist; "
+                "если все временно в списке — бот ждёт. "
+                "<b>Остановить поиск</b> или <code>/stop</code> — пауза: снова включится после кнопки «Поиск IP» "
+                "или выкл/вкл авто-крутки."
+                if self.tm.auto_spin_enabled
+                else ""
+            )
+            await _send_text(
+                update,
+                context,
+                f"Авто-крутка: <b>{state}</b>.{hint}",
+                reply_markup=_kb_main(self.tm),
+                edit=True,
+            )
+            return
         if data == "tokens":
             await _send_text(update, context, _fmt_tokens(self.tm), reply_markup=_kb_tokens(self.tm), edit=True)
             return
@@ -590,6 +648,7 @@ class BotApp:
             return
         if data == "hunter_toggle":
             if self.tm.status.hunter_running:
+                self.tm.mark_auto_spin_user_stop()
                 self.tm.stop_hunter()
                 await _send_text(update, context, "Поиск: остановлен", reply_markup=_kb_main(self.tm), edit=True)
             else:
@@ -602,6 +661,7 @@ class BotApp:
                         edit=True,
                     )
                     return
+                self.tm.clear_auto_spin_user_stop()
                 await self.tm.start_hunter()
                 await _send_text(update, context, "Поиск: запущен", reply_markup=_kb_main(self.tm), edit=True)
         elif data == "collect_toggle":

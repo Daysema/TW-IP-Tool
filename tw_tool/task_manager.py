@@ -44,6 +44,8 @@ class TaskManager:
         collect_params: CollectParams,
         target_subnets: list[SubnetRule],
         target_networks: list[Any],
+        *,
+        auto_spin_enabled: bool = False,
     ):
         self.data_dir = data_dir
         self.tokens = tokens
@@ -51,6 +53,8 @@ class TaskManager:
         self.collect_params = collect_params
         self.target_subnets = target_subnets
         self.target_networks = target_networks
+        self.auto_spin_enabled = bool(auto_spin_enabled)
+        self.auto_spin_user_stopped = False
 
         self.status = RunStatus()
 
@@ -89,6 +93,13 @@ class TaskManager:
         stop and restart tasks if you need strict consistency.
         """
         self.tokens = tokens
+
+    def mark_auto_spin_user_stop(self) -> None:
+        """User pressed Stop or /stop — do not auto-restart hunter until they start search manually or re-enable toggle."""
+        self.auto_spin_user_stopped = True
+
+    def clear_auto_spin_user_stop(self) -> None:
+        self.auto_spin_user_stopped = False
 
     async def start_hunter(self) -> None:
         if not self.tokens:

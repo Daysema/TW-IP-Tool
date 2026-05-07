@@ -26,6 +26,7 @@ class AppConfig:
     target_networks: list[ipaddress._BaseNetwork]
     allowed_chat_id: Optional[str]
     allowed_user_id: Optional[str]
+    auto_spin_enabled: bool
 
 
 def _read_json(path: Path) -> Any:
@@ -87,6 +88,21 @@ def save_config(config_path: Path, config: dict[str, Any]) -> None:
     tmp.replace(config_path)
 
 
+def patch_app_config(data_dir: Path, **updates: Any) -> None:
+    """Merge keys into data/config.json (create file if missing)."""
+    cfg_path = data_dir / "config.json"
+    raw: dict[str, Any] = {}
+    if cfg_path.exists():
+        try:
+            loaded = _read_json(cfg_path)
+            if isinstance(loaded, dict):
+                raw = loaded
+        except Exception:
+            raw = {}
+    raw.update(updates)
+    save_config(cfg_path, raw)
+
+
 def load_app_config(
     data_dir: Path,
     env_bot_token: str,
@@ -110,10 +126,12 @@ def load_app_config(
     collect_dict: dict[str, Any] = {}
     allowed_chat_id: Optional[str] = env_chat_id or None
     allowed_user_id: Optional[str] = env_admin_user_id or None
+    auto_spin_enabled = False
 
     if cfg_path.exists():
         raw = _read_json(cfg_path)
         if isinstance(raw, dict):
+            auto_spin_enabled = bool(raw.get("auto_spin", False))
             if isinstance(raw.get("allowed_chat_id"), (str, int)):
                 allowed_chat_id = str(raw["allowed_chat_id"])
             if isinstance(raw.get("allowed_user_id"), (str, int)):
@@ -182,5 +200,6 @@ def load_app_config(
         target_networks=target_networks,
         allowed_chat_id=allowed_chat_id,
         allowed_user_id=allowed_user_id,
+        auto_spin_enabled=auto_spin_enabled,
     )
 

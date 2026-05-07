@@ -261,6 +261,14 @@ class TokenBlacklist:
         return dict(self._data)
 
 
+def count_available_tokens(tokens: list[TokenEntry], data_dir: Path) -> int:
+    """How many tokens are not in the timed blacklist (can be used for API calls)."""
+    if not tokens:
+        return 0
+    bl = TokenBlacklist(data_dir / "blacklist.json")
+    return sum(1 for t in tokens if not bl.is_blacklisted(t.token))
+
+
 class IPBlacklist:
     def __init__(self, path: Path):
         self.path = path
