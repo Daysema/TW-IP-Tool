@@ -6,6 +6,7 @@ import json
 import logging
 import random
 import re
+import base64
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -39,6 +40,32 @@ def is_token_valid(token: str) -> bool:
         return False
     # HTTP header values cannot contain control chars / whitespace
     return not any(ch.isspace() or ord(ch) < 32 for ch in t)
+
+def token_login(token: str) -> str:
+    """
+    Best-effort extract login from Timeweb JWT-like token without verification.
+    Looks for payload fields: user/login/username/email.
+    Returns "" if unknown.
+    """
+    t = normalize_token(token)
+    parts = t.split(".")
+    if len(parts) < 2:
+        return ""
+    payload_b64 = parts[1]
+    # base64url padding
+    pad = "=" * (-len(payload_b64) % 4)
+    try:
+        data = base64.urlsafe_b64decode(payload_b64 + pad)
+        obj = json.loads(data.decode("utf-8", errors="ignore"))
+        if not isinstance(obj, dict):
+            return ""
+        for k in ("user", "login", "username", "email"):
+            v = obj.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    except Exception:
+        return ""
+    return ""
 
 
 @dataclass(frozen=True)
@@ -438,6 +465,7 @@ async def hunter_events(
                         "type": "admin_notice",
                         "kind": "no_balance",
                         "label": label,
+                        "login": token_login(tok.token) or "",
                         "msg": "На токене недостаточно средств (баланс/лимит).",
                     }
                     continue

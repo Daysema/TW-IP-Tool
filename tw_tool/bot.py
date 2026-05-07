@@ -20,7 +20,7 @@ from telegram.ext import (
 )
 
 from .config import dedupe_tokens, load_app_config, save_tokens
-from .core import is_token_valid, normalize_token, required_zones
+from .core import is_token_valid, normalize_token, required_zones, token_login
 from .task_manager import TaskManager
 
 logger = logging.getLogger("tw_tool")
@@ -266,9 +266,11 @@ class BotApp:
             return
         kind = ev.get("kind", "")
         label = str(ev.get("label", ""))
+        login = str(ev.get("login", "") or "")
         msg = str(ev.get("msg", ""))
         if kind == "no_balance":
-            text = f"<b>Токен:</b> <code>{label}</code>\n{msg}"
+            who = login or label
+            text = f"<b>Аккаунт:</b> <code>{who}</code>\n{msg}"
         else:
             text = f"<b>Уведомление</b>\n<code>{label}</code>\n{msg}"
         try:
@@ -419,7 +421,9 @@ class BotApp:
 
         tokens = list(self.tm.tokens)
         for t in add:
-            tokens.append(TE(token=t, label=f"token_{len(tokens)+1}"))
+            auto_label = token_login(t)
+            label = auto_label or f"token_{len(tokens)+1}"
+            tokens.append(TE(token=t, label=label))
 
         deduped = dedupe_tokens(tokens)
         removed_dups = len(tokens) - len(deduped)
@@ -488,7 +492,9 @@ class BotApp:
 
         from .core import TokenEntry as TE
 
-        tokens = [*self.tm.tokens, TE(token=tok, label=f"token_{len(self.tm.tokens)+1}")]
+        auto_label = token_login(tok)
+        label = auto_label or f"token_{len(self.tm.tokens)+1}"
+        tokens = [*self.tm.tokens, TE(token=tok, label=label)]
         save_tokens(self.data_dir / "accounts.json", tokens)
         self.tm.set_tokens(tokens)
         await _send_text(update, context, f"Добавлено: <code>1</code>. Всего: <code>{len(tokens)}</code>", reply_markup=_kb_main(self.tm))
