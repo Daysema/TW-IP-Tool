@@ -52,7 +52,7 @@ def _kb_main(tm: TaskManager) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("Конфиг", callback_data="config"),
             ],
             [
-                InlineKeyboardButton("🛠 Токены", callback_data="tokens"),
+                InlineKeyboardButton("🛠 Токены", callback_data="tokens", style="primary"),
             ],
             [
                 InlineKeyboardButton(
@@ -86,9 +86,9 @@ def _fmt_status(tm: TaskManager) -> str:
         "<i>Счётчики ниже — накопительно, до сброса кнопкой «Сброс статистики». "
         "Во время работы не меняются; обновляются после завершения прогона поиска.</i>\n\n"
         f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
-        f"Доступных токенов (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
-        f"В blacklist (из списка аккаунтов): <code>{bl_now}</code>\n\n"
+        f"Доступно (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n"
+        f"В blacklist: <code>{bl_now}</code>\n\n"
         f"Создано: <code>{st.hunter_created}</code>\n"
         f"Удалено (не подходит): <code>{st.hunter_deleted}</code>\n"
         f"Подходит (найдено): <code>{st.hunter_found}</code>\n"
