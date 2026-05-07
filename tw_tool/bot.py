@@ -328,7 +328,7 @@ class BotApp:
             await _send_text(
                 update,
                 context,
-                "Токенов нет.\n\nДобавьте файл <code>/data/accounts.json</code> и перезапустите контейнер.",
+                "Токенов нет.\n\nДобавьте токены в разделе <b>🛠 Токены</b>.",
                 reply_markup=_kb_main(self.tm),
             )
             return
@@ -591,7 +591,7 @@ class BotApp:
                     await _send_text(
                         update,
                         context,
-                        "Токенов нет. Добавьте <code>/data/accounts.json</code> и перезапустите контейнер.",
+                        "Токенов нет. Добавьте токены в разделе <b>🛠 Токены</b>.",
                         reply_markup=_kb_main(self.tm),
                         edit=True,
                     )
@@ -607,7 +607,7 @@ class BotApp:
                     await _send_text(
                         update,
                         context,
-                        "Токенов нет. Добавьте <code>/data/accounts.json</code> и перезапустите контейнер.",
+                        "Токенов нет. Добавьте токены в разделе <b>🛠 Токены</b>.",
                         reply_markup=_kb_main(self.tm),
                         edit=True,
                     )

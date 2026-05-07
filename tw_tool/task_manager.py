@@ -96,7 +96,7 @@ class TaskManager:
                 {
                     "type": "log",
                     "level": "error",
-                    "msg": "Нет токенов. Добавьте /data/accounts.json и перезапустите контейнер.",
+                    "msg": "Нет токенов. Добавьте токены в разделе «Токены» в боте.",
                 }
             )
             return
@@ -130,7 +130,7 @@ class TaskManager:
                 {
                     "type": "log",
                     "level": "error",
-                    "msg": "Нет токенов. Добавьте /data/accounts.json и перезапустите контейнер.",
+                    "msg": "Нет токенов. Добавьте токены в разделе «Токены» в боте.",
                 }
             )
             return
