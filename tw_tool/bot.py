@@ -88,7 +88,7 @@ def _fmt_status(tm: TaskManager) -> str:
         f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
         f"Доступно (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n"
-        f"В blacklist: <code>{bl_now}</code>\n\n"
+        f"Не доступно (в blacklist): <code>{bl_now}</code>\n\n"
         f"Создано: <code>{st.hunter_created}</code>\n"
         f"Удалено (не подходит): <code>{st.hunter_deleted}</code>\n"
         f"Подходит (найдено): <code>{st.hunter_found}</code>\n"
