@@ -79,19 +79,24 @@ def _allowed(update: Update, allowed_chat_id: Optional[str], allowed_user_id: Op
 
 
 def _fmt_status(tm: TaskManager) -> str:
+    s = tm.status
     st = tm.tool_stats
     bl_now = count_blacklisted_among_tokens(tm.tokens, tm.data_dir)
+    if s.hunter_running:
+        disp_c, disp_d, disp_f = s.hunter_created, s.hunter_deleted, s.hunter_found
+        suffix = "\n\n<i>— по ходу текущего поиска</i>\n"
+    else:
+        disp_c, disp_d, disp_f = st.hunter_created, st.hunter_deleted, st.hunter_found
+        suffix = "\n"
     text = (
         "<b>Панель статистики</b>\n\n"
-        "<i>Счётчики ниже — накопительно, до сброса кнопкой «Сброс статистики». "
-        "Во время работы не меняются; обновляются после завершения прогона поиска.</i>\n\n"
         f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
         f"Доступно (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n"
         f"Не доступно (в blacklist): <code>{bl_now}</code>\n\n"
-        f"Создано: <code>{st.hunter_created}</code>\n"
-        f"Удалено (не подходит): <code>{st.hunter_deleted}</code>\n"
-        f"Подходит (найдено): <code>{st.hunter_found}</code>\n"
+        f"Создано: <code>{disp_c}</code>\n"
+        f"Удалено (не подходит): <code>{disp_d}</code>\n"
+        f"Подходит (найдено): <code>{disp_f}</code>{suffix}"
     )
     return text
 

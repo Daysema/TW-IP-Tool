@@ -115,6 +115,10 @@ class TaskManager:
         if self._hunter_task and not self._hunter_task.done():
             return
         self._hunter_stop = asyncio.Event()
+        self.status.hunter_created = 0
+        self.status.hunter_deleted = 0
+        self.status.hunter_found = 0
+        self.status.hunter_blacklisted = 0
         self.status.hunter_running = True
         self._emit({"type": "log", "level": "info", "msg": "Поиск: старт"})
 
@@ -181,6 +185,11 @@ class TaskManager:
         if t == "log":
             msg = ev.get("msg", "")
             self.status.push_log(msg)
+        elif t == "hunter_state":
+            self.status.hunter_found = int(ev.get("found", self.status.hunter_found))
+            self.status.hunter_created = int(ev.get("created", self.status.hunter_created))
+            self.status.hunter_deleted = int(ev.get("deleted", self.status.hunter_deleted))
+            self.status.hunter_blacklisted = int(ev.get("blacklisted", self.status.hunter_blacklisted))
         elif t == "hunter_done":
             found = ev.get("found") or []
             self.tool_stats.hunter_created += int(ev.get("created", 0))
