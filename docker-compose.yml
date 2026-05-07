@@ -1,0 +1,12 @@
+services:
+  tw-ip-bot:
+    build: .
+    container_name: tw-ip-bot
+    restart: unless-stopped
+    environment:
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN}
+      TG_CHAT_ID: ${TG_CHAT_ID}
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+

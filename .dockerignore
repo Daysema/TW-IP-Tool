@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.git/
+results/
+tw_tool.log
+blacklist.json
+ip_blacklist.json
+tokens.txt
+data/

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.log
+
+# Local secrets / runtime data
+.env
+data/
+
+# Old local artifacts (do not publish)
+results/
+tw_tool.log
+blacklist.json
+ip_blacklist.json
+tokens.txt
+
