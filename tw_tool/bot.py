@@ -20,7 +20,7 @@ from telegram.ext import (
 )
 
 from .config import dedupe_tokens, load_app_config, patch_app_config, save_tokens
-from .core import count_available_tokens, is_token_valid, normalize_token, required_zones, token_login
+from .core import count_available_tokens, count_blacklisted_among_tokens, is_token_valid, normalize_token, required_zones, token_login
 from .task_manager import TaskManager
 
 logger = logging.getLogger("tw_tool")
@@ -30,15 +30,16 @@ STATE_ADD_BULK = 2
 
 
 def _kb_main(tm: TaskManager) -> InlineKeyboardMarkup:
-    h = "⏹ Остановить" if tm.status.hunter_running else "Поиск IP"
+    a_label = "🔁 Авто-крутка: ВКЛ" if tm.auto_spin_enabled else "🔁 Авто-крутка: ВЫКЛ"
+    a_style = "success" if tm.auto_spin_enabled else "danger"
     c = "⏹ Остановить" if tm.status.collect_running else "Проверка аккаунтов"
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    h,
-                    callback_data="hunter_toggle",
-                    style="primary" if tm.status.hunter_running else "success",
+                    a_label,
+                    callback_data="auto_spin_toggle",
+                    style=a_style,
                 ),
                 InlineKeyboardButton(
                     c,
@@ -55,8 +56,8 @@ def _kb_main(tm: TaskManager) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    "🔁 Авто-крутка: ВКЛ" if tm.auto_spin_enabled else "🔁 Авто-крутка: ВЫКЛ",
-                    callback_data="auto_spin_toggle",
+                    "🧹 Сброс статистики",
+                    callback_data="stats_reset",
                     style="danger",
                 ),
             ],
@@ -79,21 +80,25 @@ def _allowed(update: Update, allowed_chat_id: Optional[str], allowed_user_id: Op
 
 def _fmt_status(tm: TaskManager) -> str:
     s = tm.status
+    st = tm.tool_stats
     hunter_state = "запущен" if s.hunter_running else "остановлен"
     collect_state = "запущен" if s.collect_running else "остановлен"
+    bl_now = count_blacklisted_among_tokens(tm.tokens, tm.data_dir)
     text = (
         "<b>TW IP Tool · Статус</b>\n\n"
+        "<i>Счётчики ниже — накопительно, до сброса кнопкой «Сброс статистики». "
+        "Во время работы не меняются; обновляются после завершения прогона.</i>\n\n"
         f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
         f"Доступных токенов (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
-        f"В чёрном списке: <code>{s.hunter_blacklisted}</code>\n\n"
+        f"В blacklist (из списка аккаунтов): <code>{bl_now}</code>\n\n"
         f"<b>Поиск (создание IP)</b>: <b>{hunter_state}</b>\n"
-        f"Создано: <code>{s.hunter_created}</code>\n"
-        f"Удалено (не подходит): <code>{s.hunter_deleted}</code>\n"
-        f"Подходит (найдено): <code>{s.hunter_found}</code>\n\n"
+        f"Создано: <code>{st.hunter_created}</code>\n"
+        f"Удалено (не подходит): <code>{st.hunter_deleted}</code>\n"
+        f"Подходит (найдено): <code>{st.hunter_found}</code>\n\n"
         f"<b>Проверка аккаунтов</b>: <b>{collect_state}</b>\n"
-        f"Подходит (найдено): <code>{s.collect_found}</code>\n"
-        f"Удалено (лишние IP): <code>{s.collect_deleted}</code>\n"
+        f"Подходит (найдено): <code>{st.collect_found}</code>\n"
+        f"Удалено (лишние IP): <code>{st.collect_deleted}</code>\n"
     )
     return text
 
@@ -268,13 +273,10 @@ class BotApp:
             if et == "hunter_done":
                 await self._flush_logs(app, buf)
                 buf.clear()
-                await self._send_summary(app, kind="hunter", payload=ev)
                 continue
             if et == "done":
-                # collect done
                 await self._flush_logs(app, buf)
                 buf.clear()
-                await self._send_summary(app, kind="collect", payload=ev)
                 continue
             if et != "log":
                 continue
@@ -309,36 +311,6 @@ class BotApp:
             await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
         except Exception as e:
             logger.warning("Failed to send notice: %s", e)
-
-    async def _send_summary(self, app: Application, kind: str, payload: dict) -> None:
-        chat_id = self.allowed_chat_id or self._active_chat_id
-        if not chat_id:
-            return
-        try:
-            if kind == "hunter":
-                created = payload.get("created", 0)
-                found = payload.get("found") or []
-                lines = ["<b>Поиск завершен</b>", f"Создано: <code>{created}</code>", f"Подходит: <code>{len(found)}</code>"]
-                if found:
-                    lines.append("")
-                    for r in found[:12]:
-                        lines.append(f"• <code>{r.get('ip','')}</code> {r.get('loc','')} {r.get('zone','')} [{r.get('account','')}]")
-                text = "\n".join(lines)
-            else:
-                total = payload.get("total", 0)
-                found = payload.get("found", 0)
-                deleted = payload.get("deleted", 0)
-                text = "\n".join(
-                    [
-                        "<b>Проверка аккаунтов завершена</b>",
-                        f"Аккаунтов: <code>{total}</code>",
-                        f"Найдено: <code>{found}</code>",
-                        f"Удалено лишних IP: <code>{deleted}</code>",
-                    ]
-                )
-            await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-        except Exception as e:
-            logger.warning("Failed to send summary: %s", e)
 
     async def _flush_logs(self, app: Application, lines: list[str]) -> None:
         if not lines:
@@ -383,7 +355,6 @@ class BotApp:
             return
         self.tm.mark_auto_spin_user_stop()
         self.tm.stop_all()
-        await _send_text(update, context, "Останавливаю задачи…", reply_markup=_kb_main(self.tm))
 
     async def cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         if not _allowed(update, self.allowed_chat_id, self.allowed_user_id):
@@ -561,23 +532,15 @@ class BotApp:
             patch_app_config(self.data_dir, auto_spin=self.tm.auto_spin_enabled)
             if self.tm.auto_spin_enabled:
                 self.tm.clear_auto_spin_user_stop()
+                if not self.tm.tokens:
+                    await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+                    return
                 await self._try_auto_start_hunter()
-            state = "включена" if self.tm.auto_spin_enabled else "выключена"
-            hint = (
-                "\n\nПоиск сам запускается, если есть хотя бы один токен вне blacklist; "
-                "если все временно в списке — бот ждёт. "
-                "<b>Остановить поиск</b> или <code>/stop</code> — пауза: снова включится после кнопки «Поиск IP» "
-                "или выкл/вкл авто-крутки."
-                if self.tm.auto_spin_enabled
-                else ""
-            )
-            await _send_text(
-                update,
-                context,
-                f"Авто-крутка: <b>{state}</b>.{hint}",
-                reply_markup=_kb_main(self.tm),
-                edit=True,
-            )
+            else:
+                self.tm.mark_auto_spin_user_stop()
+                if self.tm.status.hunter_running:
+                    self.tm.stop_hunter()
+            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
             return
         if data == "tokens":
             await _send_text(update, context, _fmt_tokens(self.tm), reply_markup=_kb_tokens(self.tm), edit=True)
@@ -646,28 +609,13 @@ class BotApp:
             self.tm.set_tokens([])
             await _send_text(update, context, "Токены очищены.", reply_markup=_kb_main(self.tm), edit=True)
             return
-        if data == "hunter_toggle":
-            if self.tm.status.hunter_running:
-                self.tm.mark_auto_spin_user_stop()
-                self.tm.stop_hunter()
-                await _send_text(update, context, "Поиск: остановлен", reply_markup=_kb_main(self.tm), edit=True)
-            else:
-                if not self.tm.tokens:
-                    await _send_text(
-                        update,
-                        context,
-                        "Токенов нет. Добавьте токены в разделе <b>🛠 Токены</b>.",
-                        reply_markup=_kb_main(self.tm),
-                        edit=True,
-                    )
-                    return
-                self.tm.clear_auto_spin_user_stop()
-                await self.tm.start_hunter()
-                await _send_text(update, context, "Поиск: запущен", reply_markup=_kb_main(self.tm), edit=True)
-        elif data == "collect_toggle":
+        if data == "stats_reset":
+            self.tm.reset_tool_stats()
+            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+            return
+        if data == "collect_toggle":
             if self.tm.status.collect_running:
                 self.tm.stop_collect()
-                await _send_text(update, context, "Проверка аккаунтов: остановлена", reply_markup=_kb_main(self.tm), edit=True)
             else:
                 if not self.tm.tokens:
                     await _send_text(
@@ -679,8 +627,9 @@ class BotApp:
                     )
                     return
                 await self.tm.start_collect()
-                await _send_text(update, context, "Проверка аккаунтов: запущена", reply_markup=_kb_main(self.tm), edit=True)
-        elif data == "status":
+            await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
+            return
+        if data == "status":
             # Enable auto-refresh of this status message every 5 seconds.
             if update.effective_chat and update.callback_query and update.callback_query.message:
                 self._start_status_refresh(
@@ -689,12 +638,14 @@ class BotApp:
                     update.callback_query.message.message_id,
                 )
             await _send_text(update, context, _fmt_status(self.tm), reply_markup=_kb_main(self.tm), edit=True)
-        elif data == "back":
+            return
+        if data == "back":
             await _send_text(update, context, "Панель управления:", reply_markup=_kb_main(self.tm), edit=True)
-        elif data == "config":
+            return
+        if data == "config":
             await _send_text(update, context, _fmt_config(self.tm), reply_markup=_kb_main(self.tm), edit=True)
-        else:
-            await _send_text(update, context, "Неизвестная команда", reply_markup=_kb_main(self.tm), edit=True)
+            return
+        await _send_text(update, context, "Неизвестная команда", reply_markup=_kb_main(self.tm), edit=True)
 
     def _start_status_refresh(self, app: Application, chat_id: str, message_id: int) -> None:
         self._status_target = (chat_id, int(message_id))

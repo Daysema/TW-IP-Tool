@@ -269,6 +269,14 @@ def count_available_tokens(tokens: list[TokenEntry], data_dir: Path) -> int:
     return sum(1 for t in tokens if not bl.is_blacklisted(t.token))
 
 
+def count_blacklisted_among_tokens(tokens: list[TokenEntry], data_dir: Path) -> int:
+    """How many loaded accounts are currently in the timed token blacklist."""
+    if not tokens:
+        return 0
+    bl = TokenBlacklist(data_dir / "blacklist.json")
+    return sum(1 for t in tokens if bl.is_blacklisted(t.token))
+
+
 class IPBlacklist:
     def __init__(self, path: Path):
         self.path = path
@@ -347,7 +355,7 @@ async def hunter_events(
     zones_to_try = [z for z in params.zones if z in rz] or list(rz) or list(params.zones)
 
     yield {"type": "log", "level": "info", "msg": f"ПОИСК запущен. Токенов: {len(tokens)}, зон: {zones_to_try}"}
-    yield {"type": "hunter_state", "found": 0, "created": 0, "blacklisted": 0}
+    yield {"type": "hunter_state", "found": 0, "created": 0, "deleted": 0, "blacklisted": 0}
 
     token_idx = 0
     while not stop_event.is_set():
@@ -520,7 +528,7 @@ async def hunter_events(
             await asyncio.sleep(0.5)
 
     yield {"type": "log", "level": "info", "msg": "Поиск остановлен."}
-    yield {"type": "hunter_done", "found": list(found_subnets.values()), "created": total_created}
+    yield {"type": "hunter_done", "found": list(found_subnets.values()), "created": total_created, "deleted": total_deleted}
 
 
 async def collect_run(

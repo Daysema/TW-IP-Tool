@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
+from .config import ToolStats, load_tool_stats, save_tool_stats
 from .core import (
     CollectParams,
     HunterParams,
@@ -64,6 +65,8 @@ class TaskManager:
         self._collect_stop = asyncio.Event()
 
         self._queue: "asyncio.Queue[dict[str, Any]]" = asyncio.Queue()
+
+        self.tool_stats: ToolStats = load_tool_stats(data_dir)
 
     def events(self) -> AsyncIterator[dict[str, Any]]:
         async def _gen():
@@ -168,25 +171,27 @@ class TaskManager:
 
         self._collect_task = asyncio.create_task(_run())
 
+    def reset_tool_stats(self) -> None:
+        self.tool_stats = ToolStats()
+        save_tool_stats(self.data_dir, self.tool_stats)
+        self.status.last_found.clear()
+        self.status.recent_logs.clear()
+        self.status.last_results_path = None
+
     def _handle_event(self, ev: dict[str, Any]) -> None:
         t = ev.get("type")
         if t == "log":
             msg = ev.get("msg", "")
             self.status.push_log(msg)
-        elif t == "hunter_state":
-            self.status.hunter_found = int(ev.get("found", self.status.hunter_found))
-            self.status.hunter_created = int(ev.get("created", self.status.hunter_created))
-            self.status.hunter_deleted = int(ev.get("deleted", self.status.hunter_deleted))
-            self.status.hunter_blacklisted = int(ev.get("blacklisted", self.status.hunter_blacklisted))
-        elif t == "hunter_found":
-            # keep small list of recent found
-            self.status.last_found.insert(0, {k: ev.get(k) for k in ("ip", "prefix", "loc", "zone", "account")})
-            self.status.last_found = self.status.last_found[:30]
-        elif t == "collect_state":
-            self.status.collect_found = int(ev.get("found", self.status.collect_found))
-            self.status.collect_deleted = int(ev.get("deleted", self.status.collect_deleted))
+        elif t == "hunter_done":
+            found = ev.get("found") or []
+            self.tool_stats.hunter_created += int(ev.get("created", 0))
+            self.tool_stats.hunter_deleted += int(ev.get("deleted", 0))
+            self.tool_stats.hunter_found += len(found)
+            save_tool_stats(self.data_dir, self.tool_stats)
         elif t == "done":
             self.status.last_results_path = ev.get("json_path") or self.status.last_results_path
-            self.status.collect_found = int(ev.get("found", self.status.collect_found))
-            self.status.collect_deleted = int(ev.get("deleted", self.status.collect_deleted))
+            self.tool_stats.collect_found += int(ev.get("found", 0))
+            self.tool_stats.collect_deleted += int(ev.get("deleted", 0))
+            save_tool_stats(self.data_dir, self.tool_stats)
 

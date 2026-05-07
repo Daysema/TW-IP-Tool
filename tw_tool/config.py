@@ -29,8 +29,54 @@ class AppConfig:
     auto_spin_enabled: bool
 
 
+@dataclass
+class ToolStats:
+    """Накопительная статистика (обновляется по завершении прогона; сброс — кнопкой в боте)."""
+
+    hunter_created: int = 0
+    hunter_deleted: int = 0
+    hunter_found: int = 0
+    collect_found: int = 0
+    collect_deleted: int = 0
+
+
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_tool_stats(data_dir: Path) -> ToolStats:
+    p = data_dir / "stats.json"
+    if not p.exists():
+        return ToolStats()
+    try:
+        raw = _read_json(p)
+        if not isinstance(raw, dict):
+            return ToolStats()
+        return ToolStats(
+            hunter_created=int(raw.get("hunter_created", 0)),
+            hunter_deleted=int(raw.get("hunter_deleted", 0)),
+            hunter_found=int(raw.get("hunter_found", 0)),
+            collect_found=int(raw.get("collect_found", 0)),
+            collect_deleted=int(raw.get("collect_deleted", 0)),
+        )
+    except Exception:
+        return ToolStats()
+
+
+def save_tool_stats(data_dir: Path, s: ToolStats) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    p = data_dir / "stats.json"
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    payload = {
+        "hunter_created": s.hunter_created,
+        "hunter_deleted": s.hunter_deleted,
+        "hunter_found": s.hunter_found,
+        "collect_found": s.collect_found,
+        "collect_deleted": s.collect_deleted,
+    }
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
 
 def dedupe_tokens(tokens: list[TokenEntry]) -> list[TokenEntry]:
     """
