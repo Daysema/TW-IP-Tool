@@ -418,10 +418,6 @@ async def hunter_events(
                     except Exception:
                         pass
 
-                # 5xx от Timeweb — чаще временные проблемы API, не спамим в чат (info).
-                lvl = "info" if isinstance(status, int) and 500 <= status <= 599 else "error"
-                yield {"type": "log", "level": lvl, "msg": f"[{label}] Ошибка {status}: {str(body)[:160]}"}
-
                 body_l = str(body).lower()
                 # Если на аккаунте нет денег или лимит создания IP исчерпан —
                 # бессмысленно продолжать попытки: отправляем токен в blacklist на 23 часа.
@@ -436,7 +432,8 @@ async def hunter_events(
                     or "quota" in body_l
                 ):
                     token_bl.add(tok.token, "no_balance_or_quota", ttl_hours=24)
-                    yield {"type": "log", "level": "warn", "msg": f"[{label}] → blacklist на 24ч (баланс/лимит)"}
+                    # В чат отправляем только одно отдельное уведомление.
+                    yield {"type": "log", "level": "info", "msg": f"[{label}] → blacklist на 24ч (баланс/лимит)"}
                     yield {
                         "type": "admin_notice",
                         "kind": "no_balance",
@@ -444,6 +441,10 @@ async def hunter_events(
                         "msg": "На токене недостаточно средств (баланс/лимит).",
                     }
                     continue
+
+                # 5xx от Timeweb — чаще временные проблемы API, не спамим в чат (info).
+                lvl = "info" if isinstance(status, int) and 500 <= status <= 599 else "error"
+                yield {"type": "log", "level": lvl, "msg": f"[{label}] Ошибка {status}: {str(body)[:160]}"}
 
                 if status in (403, 429):
                     token_bl.add(tok.token, f"http_{status}")
