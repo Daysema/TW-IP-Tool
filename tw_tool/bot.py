@@ -79,24 +79,19 @@ def _allowed(update: Update, allowed_chat_id: Optional[str], allowed_user_id: Op
 
 
 def _fmt_status(tm: TaskManager) -> str:
-    s = tm.status
     st = tm.tool_stats
-    collect_state = "запущен" if s.collect_running else "остановлен"
     bl_now = count_blacklisted_among_tokens(tm.tokens, tm.data_dir)
     text = (
         "<b>TW IP Tool · Статус</b>\n\n"
         "<i>Счётчики ниже — накопительно, до сброса кнопкой «Сброс статистики». "
-        "Во время работы не меняются; обновляются после завершения прогона.</i>\n\n"
+        "Во время работы не меняются; обновляются после завершения прогона поиска.</i>\n\n"
         f"<b>Авто-крутка</b>: <b>{'включена' if tm.auto_spin_enabled else 'выключена'}</b>\n"
         f"Доступных токенов (не в blacklist): <code>{count_available_tokens(tm.tokens, tm.data_dir)}</code>\n\n"
         f"Токенов: <code>{len(tm.tokens)}</code>\n"
         f"В blacklist (из списка аккаунтов): <code>{bl_now}</code>\n\n"
         f"Создано: <code>{st.hunter_created}</code>\n"
         f"Удалено (не подходит): <code>{st.hunter_deleted}</code>\n"
-        f"Подходит (найдено): <code>{st.hunter_found}</code>\n\n"
-        f"<b>Проверка аккаунтов</b>: <b>{collect_state}</b>\n"
-        f"Подходит (найдено): <code>{st.collect_found}</code>\n"
-        f"Удалено (лишние IP): <code>{st.collect_deleted}</code>\n"
+        f"Подходит (найдено): <code>{st.hunter_found}</code>\n"
     )
     return text
 
@@ -275,6 +270,7 @@ class BotApp:
             if et == "done":
                 await self._flush_logs(app, buf)
                 buf.clear()
+                await self._send_collect_report(app, ev)
                 continue
             if et != "log":
                 continue
@@ -309,6 +305,26 @@ class BotApp:
             await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
         except Exception as e:
             logger.warning("Failed to send notice: %s", e)
+
+    async def _send_collect_report(self, app: Application, payload: dict) -> None:
+        chat_id = self.allowed_chat_id or self._active_chat_id
+        if not chat_id:
+            return
+        try:
+            total = int(payload.get("total", 0))
+            found = int(payload.get("found", 0))
+            deleted = int(payload.get("deleted", 0))
+            text = "\n".join(
+                [
+                    "<b>Отчёт: проверка аккаунтов</b>",
+                    f"Аккаунтов: <code>{total}</code>",
+                    f"Найдено (в целевых): <code>{found}</code>",
+                    f"Удалено лишних IP: <code>{deleted}</code>",
+                ]
+            )
+            await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.warning("Failed to send collect report: %s", e)
 
     async def _flush_logs(self, app: Application, lines: list[str]) -> None:
         if not lines:

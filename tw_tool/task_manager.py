@@ -24,8 +24,6 @@ class RunStatus:
     hunter_created: int = 0
     hunter_deleted: int = 0
     hunter_blacklisted: int = 0
-    collect_found: int = 0
-    collect_deleted: int = 0
     last_results_path: Optional[str] = None
     last_found: list[dict[str, Any]] = field(default_factory=list)
     recent_logs: list[str] = field(default_factory=list)
@@ -191,7 +189,4 @@ class TaskManager:
             save_tool_stats(self.data_dir, self.tool_stats)
         elif t == "done":
             self.status.last_results_path = ev.get("json_path") or self.status.last_results_path
-            self.tool_stats.collect_found += int(ev.get("found", 0))
-            self.tool_stats.collect_deleted += int(ev.get("deleted", 0))
-            save_tool_stats(self.data_dir, self.tool_stats)
 

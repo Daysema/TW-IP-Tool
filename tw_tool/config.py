@@ -31,13 +31,11 @@ class AppConfig:
 
 @dataclass
 class ToolStats:
-    """Накопительная статистика (обновляется по завершении прогона; сброс — кнопкой в боте)."""
+    """Накопительная статистика поиска (обновляется по завершении прогона; сброс — кнопкой в боте)."""
 
     hunter_created: int = 0
     hunter_deleted: int = 0
     hunter_found: int = 0
-    collect_found: int = 0
-    collect_deleted: int = 0
 
 
 def _read_json(path: Path) -> Any:
@@ -56,8 +54,6 @@ def load_tool_stats(data_dir: Path) -> ToolStats:
             hunter_created=int(raw.get("hunter_created", 0)),
             hunter_deleted=int(raw.get("hunter_deleted", 0)),
             hunter_found=int(raw.get("hunter_found", 0)),
-            collect_found=int(raw.get("collect_found", 0)),
-            collect_deleted=int(raw.get("collect_deleted", 0)),
         )
     except Exception:
         return ToolStats()
@@ -71,8 +67,6 @@ def save_tool_stats(data_dir: Path, s: ToolStats) -> None:
         "hunter_created": s.hunter_created,
         "hunter_deleted": s.hunter_deleted,
         "hunter_found": s.hunter_found,
-        "collect_found": s.collect_found,
-        "collect_deleted": s.collect_deleted,
     }
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
