@@ -330,8 +330,10 @@ async def hunter_events(
         label = tok.label or tok_key
 
         if daily_cnt[tok.token] >= params.daily_limit:
-            yield {"type": "log", "level": "warn", "msg": f"[{label}] Дневной лимит, blacklist"}
-            token_bl.add(tok.token, "daily_limit")
+            # Достигли дневного лимита по нашим счётчикам — просто пропускаем токен на 23 часа.
+            # Не спамим в чат этим событием.
+            yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (23ч)"}
+            token_bl.add(tok.token, "daily_limit", ttl_hours=23)
             async with make_client(tok.token, tok.proxy) as cl:
                 async for ev in cleanup_nontarget_ips(cl, ip_bl, label, target_networks):
                     yield ev
@@ -407,24 +409,10 @@ async def hunter_events(
                         if isinstance(j, dict):
                             err = str(j.get("error_code", "")).lower()
                             if err == "daily_limit_exceeded":
-                                dt_s = (
-                                    (j.get("details") or {}).get("available_date_for_creation")
-                                    if isinstance(j.get("details"), dict)
-                                    else None
-                                )
-                                if isinstance(dt_s, str) and dt_s:
-                                    try:
-                                        # API gives ISO with timezone, python can parse it
-                                        dt = datetime.fromisoformat(dt_s.replace("Z", "+00:00"))
-                                        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-                                        ttl_h = max(0.5, (dt - now).total_seconds() / 3600.0)
-                                    except Exception:
-                                        ttl_h = 23.0
-                                else:
-                                    ttl_h = 23.0
-                                token_bl.add(tok.token, "daily_limit_exceeded", ttl_hours=ttl_h)
+                                # По требованию: кидаем в blacklist ровно на 23 часа, без уведомлений в чат.
+                                token_bl.add(tok.token, "daily_limit_exceeded", ttl_hours=23)
                                 # Не спамим в чат такими событиями — это ожидаемая ситуация.
-                                yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist"}
+                                yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (23ч)"}
                                 continue
                     except Exception:
                         pass
