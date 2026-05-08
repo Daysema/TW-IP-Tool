@@ -186,9 +186,7 @@ class BotApp:
         )
 
         self._log_task: Optional[asyncio.Task] = None
-        self._status_task: Optional[asyncio.Task] = None
         self._auto_spin_task: Optional[asyncio.Task] = None
-        self._status_target: Optional[tuple[str, int]] = None  # (chat_id, message_id)
 
     async def _open_main_panel(
         self,
@@ -198,8 +196,7 @@ class BotApp:
         edit: bool = False,
         extra_html: str = "",
     ) -> None:
-        """Главный экран: статистика + клавиатура; при необходимости автообновление текста."""
-        app = context.application
+        """Главный экран: статистика + клавиатура. Обновление — только при /start, /status или кнопке «Статистика»."""
         base = _fmt_status(self.tm)
         text = f"{base}\n\n{extra_html}" if extra_html else base
         chat = update.effective_chat
@@ -211,13 +208,10 @@ class BotApp:
         if q and edit and q.message:
             try:
                 await q.edit_message_text(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
-                self._start_status_refresh(app, str(chat.id), q.message.message_id)
             except BadRequest:
-                m = await chat.send_message(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
-                self._start_status_refresh(app, str(chat.id), m.message_id)
+                await chat.send_message(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
         else:
-            m = await chat.send_message(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
-            self._start_status_refresh(app, str(chat.id), m.message_id)
+            await chat.send_message(text=text, reply_markup=rm, parse_mode=ParseMode.HTML)
 
     def run(self) -> None:
         app = Application.builder().token(self.bot_token).build()
@@ -261,7 +255,6 @@ class BotApp:
                 logger.warning("Failed to set bot commands: %s", e)
             self._log_task = asyncio.create_task(self._log_loop(app))
             self._auto_spin_task = asyncio.create_task(self._auto_spin_loop())
-            # status refresher runs on-demand (when user opens status)
 
         app.post_init = _post_init
         app.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -593,9 +586,6 @@ class BotApp:
             self._active_chat_id = str(update.effective_chat.id)
 
         data = q.data or ""
-        # Уход с главной панели (статистика) — останавливаем автообновление; кнопка «Статистика» не трогает.
-        if data != "status":
-            self._stop_status_refresh()
         if data == "auto_spin_toggle":
             self.tm.auto_spin_enabled = not self.tm.auto_spin_enabled
             patch_app_config(self.data_dir, auto_spin=self.tm.auto_spin_enabled)
@@ -712,38 +702,6 @@ class BotApp:
             await _send_text(update, context, _fmt_config(self.tm), reply_markup=_kb_main(self.tm), edit=True)
             return
         await self._open_main_panel(update, context, edit=True, extra_html="<b>Неизвестная команда</b>")
-
-    def _start_status_refresh(self, app: Application, chat_id: str, message_id: int) -> None:
-        self._status_target = (chat_id, int(message_id))
-        if self._status_task and not self._status_task.done():
-            return
-
-        async def _loop():
-            # Refresh while target is set; stop after ~30 minutes to avoid runaway tasks
-            for _ in range(30 * 60 // 5):
-                if not self._status_target:
-                    return
-                c_id, m_id = self._status_target
-                try:
-                    await app.bot.edit_message_text(
-                        chat_id=c_id,
-                        message_id=m_id,
-                        text=_fmt_status(self.tm),
-                        reply_markup=_kb_main(self.tm),
-                        parse_mode=ParseMode.HTML,
-                    )
-                except BadRequest:
-                    # Can't edit anymore; stop refreshing.
-                    self._status_target = None
-                    return
-                except Exception as e:
-                    logger.warning("Status refresh failed: %s", e)
-                await asyncio.sleep(5)
-
-        self._status_task = asyncio.create_task(_loop())
-
-    def _stop_status_refresh(self) -> None:
-        self._status_target = None
 
 
 def run_bot() -> None:
