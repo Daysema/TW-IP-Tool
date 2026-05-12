@@ -19,6 +19,15 @@ logger = logging.getLogger("tw_tool")
 
 API_BASE = "https://api.timeweb.cloud/api/v1"
 
+
+class _CollectFetchTimeout(Exception):
+    """Floating-ips list failed after retries due to HTTP timeout."""
+
+    __slots__ = ("token",)
+
+    def __init__(self, token: "TokenEntry") -> None:
+        self.token = token
+
 _BEARER_RE = re.compile(r"(Bearer\s+)([A-Za-z0-9._\-]+)")
 
 
@@ -136,17 +145,22 @@ async def create_ip(client: httpx.AsyncClient, zone: str) -> dict[str, Any]:
         if r.status_code == 201:
             return {"ok": True, "data": r.json()}
         return {"ok": False, "status": r.status_code, "body": r.text[:300]}
+    except httpx.TimeoutException as e:
+        return {"ok": False, "status": 0, "body": _mask_secrets(f"{type(e).__name__}: {e}"), "timeout": True}
     except Exception as e:
         return {"ok": False, "status": 0, "body": _mask_secrets(f"{type(e).__name__}: {e}")}
 
 
-async def delete_ip(client: httpx.AsyncClient, ip_id: int | str) -> tuple[bool, int | None, str]:
+async def delete_ip(client: httpx.AsyncClient, ip_id: int | str) -> tuple[bool, int | None, str, bool]:
+    """Returns (ok, status, body, timed_out)."""
     try:
         r = await client.delete(f"{API_BASE}/floating-ips/{ip_id}")
         ok = r.status_code in (200, 204)
-        return ok, r.status_code, (r.text or "")[:300]
+        return ok, r.status_code, (r.text or "")[:300], False
+    except httpx.TimeoutException:
+        return False, None, "timeout", True
     except Exception as e:
-        return False, None, f"{type(e).__name__}: {e}"
+        return False, None, f"{type(e).__name__}: {e}", False
 
 
 async def list_ips(
@@ -362,6 +376,9 @@ async def cleanup_nontarget_ips(
     ip_bl: IPBlacklist,
     label: str,
     target_networks: list[ipaddress._BaseNetwork],
+    *,
+    token_bl: Optional["TokenBlacklist"] = None,
+    token: Optional[str] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     ips = await list_ips(client)
     deleted = 0
@@ -373,10 +390,13 @@ async def cleanup_nontarget_ips(
         # По требованию: любой НЕцелевой IP всегда удаляем (даже если уже встречался раньше).
         if not ip_in_targets(addr, target_networks):
             yield {"type": "log", "level": "info", "msg": f"[{label}] Удаляю нецелевой IP: {addr}"}
-            ok, status, body = await delete_ip(client, iid)
+            ok, status, body, timed_out = await delete_ip(client, iid)
             if ok:
                 ip_bl.add(addr)
                 deleted += 1
+            elif timed_out and token_bl is not None and token:
+                token_bl.add(token, "timeout", ttl_hours=1.0)
+                break
             else:
                 yield {"type": "log", "level": "error", "msg": f"[{label}] Не удалилось {addr}: HTTP {status} {body}"}
             await asyncio.sleep(0.4)
@@ -432,7 +452,9 @@ async def hunter_events(
             yield {"type": "log", "level": "info", "msg": f"[{label}] Дневной лимит → в blacklist (24ч)"}
             token_bl.add(tok.token, "daily_limit", ttl_hours=24)
             async with make_client(tok.token, tok.proxy) as cl:
-                async for ev in cleanup_nontarget_ips(cl, ip_bl, label, target_networks):
+                async for ev in cleanup_nontarget_ips(
+                    cl, ip_bl, label, target_networks, token_bl=token_bl, token=tok.token
+                ):
                     yield ev
             continue
 
@@ -447,6 +469,10 @@ async def hunter_events(
 
         async with make_client(tok.token, tok.proxy) as cl:
             res = await create_ip(cl, zone)
+            if res.get("timeout"):
+                token_bl.add(tok.token, "timeout", ttl_hours=1.0)
+                malformed_cnt.pop(tok.token, None)
+                continue
             if res["ok"]:
                 total_created += 1
                 daily_cnt[tok.token] += 1
@@ -484,10 +510,14 @@ async def hunter_events(
                     yield {"type": "log", "level": "info", "msg": f"[{label}] ✗ Не подходит: {addr} — удаляю"}
                     if iid is not None:
                         await asyncio.sleep(0.4)
-                        ok, status, body = await delete_ip(cl, iid)
+                        ok, status, body, timed_out = await delete_ip(cl, iid)
                         if ok:
                             ip_bl.add(addr)
                             total_deleted += 1
+                        elif timed_out:
+                            token_bl.add(tok.token, "timeout", ttl_hours=1.0)
+                            malformed_cnt.pop(tok.token, None)
+                            break
                         else:
                             yield {"type": "log", "level": "error", "msg": f"[{label}] Не удалилось {addr}: HTTP {status} {body}"}
                 elif in_t:
@@ -547,7 +577,9 @@ async def hunter_events(
                     token_bl.add(tok.token, f"http_{status}")
                     yield {"type": "log", "level": "warn", "msg": f"[{label}] → blacklist (HTTP {status})"}
                     async with make_client(tok.token, tok.proxy) as cl2:
-                        async for ev in cleanup_nontarget_ips(cl2, ip_bl, label, target_networks):
+                        async for ev in cleanup_nontarget_ips(
+                            cl2, ip_bl, label, target_networks, token_bl=token_bl, token=tok.token
+                        ):
                             yield ev
                 elif status == 0:
                     malformed_cnt[tok.token] = malformed_cnt.get(tok.token, 0) + 1
@@ -591,6 +623,7 @@ async def collect_run(
     target_networks: list[ipaddress._BaseNetwork],
     stop_event: asyncio.Event,
 ) -> AsyncIterator[dict[str, Any]]:
+    token_bl = TokenBlacklist(data_dir / "blacklist.json")
     sem = asyncio.Semaphore(params.parallel)
     total = len(tokens)
     found = 0
@@ -615,18 +648,26 @@ async def collect_run(
                     if stop_event.is_set():
                         break
                     r = None
+                    last_exc: BaseException | None = None
                     for attempt in range(1, params.retries + 1):
                         try:
                             r = await cl.get(f"{API_BASE}/floating-ips", params={"limit": limit, "offset": offset})
                             if r.status_code == 200:
+                                last_exc = None
                                 break
                             if r.status_code in (429, 500, 502, 503, 504):
                                 await asyncio.sleep(2**attempt)
                                 r = None
-                        except httpx.RequestError:
+                        except httpx.TimeoutException as e:
+                            last_exc = e
+                            await asyncio.sleep(2**attempt)
+                        except httpx.RequestError as e:
+                            last_exc = e
                             await asyncio.sleep(2**attempt)
 
                     if r is None or r.status_code != 200:
+                        if isinstance(last_exc, httpx.TimeoutException):
+                            raise _CollectFetchTimeout(tok)
                         raise RuntimeError("Нет ответа от API")
 
                     data = r.json()
@@ -664,6 +705,10 @@ async def collect_run(
         done_count += 1
         try:
             tok, label, ips = await coro
+        except _CollectFetchTimeout as e:
+            token_bl.add(e.token.token, "timeout", ttl_hours=1.0)
+            yield {"type": "progress", "done": done_count, "total": total, "found": found}
+            continue
         except Exception as e:
             # Ошибка проверки одного аккаунта (после ретраев) — не спамим в чат.
             yield {"type": "log", "level": "info", "msg": f"[?] Ошибка проверки аккаунта: {e}"}
@@ -685,8 +730,11 @@ async def collect_run(
                     if ip_in_targets(addr, target_networks):
                         continue
                     yield {"type": "log", "level": "info", "msg": f"[{label}] Удаляю лишний IP: {addr}"}
-                    ok, status, body = await delete_ip(cl, iid)
+                    ok, status, body, timed_out = await delete_ip(cl, iid)
                     if not ok:
+                        if timed_out:
+                            token_bl.add(tok.token, "timeout", ttl_hours=1.0)
+                            break
                         yield {"type": "log", "level": "error", "msg": f"[{label}] Не удалось удалить {addr}: HTTP {status} {body}"}
                     else:
                         deleted_total += 1
